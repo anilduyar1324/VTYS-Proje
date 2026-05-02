@@ -1,0 +1,64 @@
+-- 1. Veritabanını Temizle ve Yeniden Oluştur
+DROP DATABASE IF EXISTS vtys_proje;
+CREATE DATABASE vtys_proje DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;
+USE vtys_proje;
+
+-- 2. DDL: Tabloları Oluştur (Hocanın istediği en az 2 tablo şartı burada 4 tablo ile sağlanıyor)
+CREATE TABLE Departmanlar (
+  DepartmanID INT AUTO_INCREMENT PRIMARY KEY,
+  DepartmanAdi VARCHAR(100) NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE Personeller (
+  PersonelID INT AUTO_INCREMENT PRIMARY KEY,
+  Ad VARCHAR(50) NOT NULL,
+  Soyad VARCHAR(50) NOT NULL,
+  SaatlikUcret DECIMAL(10,2) NOT NULL,
+  DepartmanID INT,
+  FOREIGN KEY (DepartmanID) REFERENCES Departmanlar(DepartmanID)
+) ENGINE=InnoDB;
+
+CREATE TABLE Devam_Takip (
+  TakipID INT AUTO_INCREMENT PRIMARY KEY,
+  PersonelID INT,
+  Tarih DATE NOT NULL,
+  GirisSaati TIME,
+  CikisSaati TIME,
+  ToplamMesaiSaat DECIMAL(5,2),
+  FOREIGN KEY (PersonelID) REFERENCES Personeller(PersonelID)
+) ENGINE=InnoDB;
+
+CREATE TABLE Maas_Odemeleri (
+  OdemeID INT AUTO_INCREMENT PRIMARY KEY,
+  PersonelID INT,
+  ToplamMaas DECIMAL(10,2) NOT NULL,
+  OdemeTarihi DATE NOT NULL,
+  FOREIGN KEY (PersonelID) REFERENCES Personeller(PersonelID)
+) ENGINE=InnoDB;
+
+-- 3. DML: Örnek Veri Ekleme (INSERT)
+INSERT INTO Departmanlar (DepartmanAdi) VALUES ('Yazılım'), ('İnsan Kaynakları'), ('Muhasebe');
+INSERT INTO Personeller (Ad, Soyad, SaatlikUcret, DepartmanID) VALUES 
+('Yusuf', 'Yalçın', 250.00, 1), 
+('Enes', 'Demir', 300.00, 1),
+('Anıl', 'Duyar', 300.00, 1),
+('Ömer', 'Öney', 250.00, 1),
+
+-- Örnek UPDATE ve DELETE (DML Şartı İçin)
+UPDATE Personeller SET SaatlikUcret = 275.00 WHERE PersonelID = 1;
+DELETE FROM Personeller WHERE Ad = 'Geçici' AND Soyad = 'Kayıt';
+
+-- 4. VIEW OLUŞTURMA (Hocanın İstediği Görünüm)
+-- Bu view personelleri departman isimleriyle birlikte listeler
+CREATE VIEW vw_Personel_Departman AS
+SELECT P.Ad, P.Soyad, D.DepartmanAdi
+FROM Personeller P
+INNER JOIN Departmanlar D ON P.DepartmanID = D.DepartmanID;
+
+-- 5. STORED PROCEDURE OLUŞTURMA (Hocanın İstediği Saklı Yordam)
+DELIMITER //
+CREATE PROCEDURE sp_MaasGuncelle(IN p_PersonelID INT, IN p_YeniUcret DECIMAL(10,2))
+BEGIN
+    UPDATE Personeller SET SaatlikUcret = p_YeniUcret WHERE PersonelID = p_PersonelID;
+END //
+DELIMITER ;
