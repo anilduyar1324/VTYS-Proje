@@ -1,64 +1,179 @@
--- 1. Veritabanını Temizle ve Yeniden Oluştur
-DROP DATABASE IF EXISTS vtys_proje;
-CREATE DATABASE vtys_proje DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;
-USE vtys_proje;
+<?php
+session_start();
+if(!isset($_SESSION['admin'])){ header("Location: login.php"); exit(); }
 
--- 2. DDL: Tabloları Oluştur (Hocanın istediği en az 2 tablo şartı burada 4 tablo ile sağlanıyor)
-CREATE TABLE Departmanlar (
-  DepartmanID INT AUTO_INCREMENT PRIMARY KEY,
-  DepartmanAdi VARCHAR(100) NOT NULL
-) ENGINE=InnoDB;
+$host = 'localhost'; $dbname = 'vtys_proje'; $user = 'root'; $pass = '';
+try {
+    $db = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $user, $pass);
+} catch (PDOException $e) { die("Bağlantı hatası: " . $e->getMessage()); }
 
-CREATE TABLE Personeller (
-  PersonelID INT AUTO_INCREMENT PRIMARY KEY,
-  Ad VARCHAR(50) NOT NULL,
-  Soyad VARCHAR(50) NOT NULL,
-  SaatlikUcret DECIMAL(10,2) NOT NULL,
-  DepartmanID INT,
-  FOREIGN KEY (DepartmanID) REFERENCES Departmanlar(DepartmanID)
-) ENGINE=InnoDB;
+if(isset($_GET['logout'])){ session_destroy(); header("Location: login.php"); exit(); }
 
-CREATE TABLE Devam_Takip (
-  TakipID INT AUTO_INCREMENT PRIMARY KEY,
-  PersonelID INT,
-  Tarih DATE NOT NULL,
-  GirisSaati TIME,
-  CikisSaati TIME,
-  ToplamMesaiSaat DECIMAL(5,2),
-  FOREIGN KEY (PersonelID) REFERENCES Personeller(PersonelID)
-) ENGINE=InnoDB;
+if(isset($_GET['sil'])){
+    $db->prepare("DELETE FROM Personeller WHERE PersonelID = ?")->execute([$_GET['sil']]);
+    header("Location: index.php"); exit();
+}
 
-CREATE TABLE Maas_Odemeleri (
-  OdemeID INT AUTO_INCREMENT PRIMARY KEY,
-  PersonelID INT,
-  ToplamMaas DECIMAL(10,2) NOT NULL,
-  OdemeTarihi DATE NOT NULL,
-  FOREIGN KEY (PersonelID) REFERENCES Personeller(PersonelID)
-) ENGINE=InnoDB;
+if (isset($_POST['kaydet'])) {
+    $sorgu = $db->prepare("INSERT INTO Personeller (Ad, Soyad, SaatlikUcret, DepartmanID, GirisSaati, CikisSaati) VALUES (?, ?, ?, ?, ?, ?)");
+    $sorgu->execute([$_POST['ad'], $_POST['soyad'], $_POST['ucret'], $_POST['dept_id'], $_POST['giris'], $_POST['cikis']]);
+    header("Location: index.php?durum=ok"); exit();
+}
 
--- 3. DML: Örnek Veri Ekleme (INSERT)
-INSERT INTO Departmanlar (DepartmanAdi) VALUES ('Yazılım'), ('İnsan Kaynakları'), ('Muhasebe');
-INSERT INTO Personeller (Ad, Soyad, SaatlikUcret, DepartmanID) VALUES 
-('Yusuf', 'Yalçın', 250.00, 1), 
-('Enes', 'Demir', 300.00, 1),
-('Anıl', 'Duyar', 300.00, 1),
-('Ömer', 'Öney', 250.00, 1),
+$grafik = $db->query("SELECT d.DepartmanAdi, COUNT(p.PersonelID) as sayi FROM Departmanlar d LEFT JOIN Personeller p ON d.DepartmanID = p.DepartmanID GROUP BY d.DepartmanID")->fetchAll(PDO::FETCH_ASSOC);
+$labels = []; $counts = [];
+foreach($grafik as $g){ $labels[] = $g['DepartmanAdi']; $counts[] = $g['sayi']; }
+?>
 
--- Örnek UPDATE ve DELETE (DML Şartı İçin)
-UPDATE Personeller SET SaatlikUcret = 275.00 WHERE PersonelID = 1;
-DELETE FROM Personeller WHERE Ad = 'Geçici' AND Soyad = 'Kayıt';
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Personel Takip Sistemi v4.2</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #f1f5f9; font-family: 'Inter', sans-serif; }
+        .navbar { background: #1e293b; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .card { border: none; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.04); }
+        .btn-add { background: #2563eb; color: white; border: none; padding: 12px; }
+        .badge-money { background: #dcfce7; color: #15803d; font-weight: bold; border-radius: 8px; }
+        .row-id { background: #334155; color: white; border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
 
--- 4. VIEW OLUŞTURMA (Hocanın İstediği Görünüm)
--- Bu view personelleri departman isimleriyle birlikte listeler
-CREATE VIEW vw_Personel_Departman AS
-SELECT P.Ad, P.Soyad, D.DepartmanAdi
-FROM Personeller P
-INNER JOIN Departmanlar D ON P.DepartmanID = D.DepartmanID;
+<nav class="navbar navbar-dark py-3 mb-5">
+    <div class="container d-flex justify-content-between">
+        <span class="navbar-brand fw-bold text-uppercase"><i class="fas fa-users-viewfinder me-2 text-info"></i> Personel Takip Sistemi</span>
+        <a href="?logout=1" class="btn btn-outline-light btn-sm px-4 rounded-pill">Güvenli Çıkış</a>
+    </div>
+</nav>
 
--- 5. STORED PROCEDURE OLUŞTURMA (Hocanın İstediği Saklı Yordam)
-DELIMITER //
-CREATE PROCEDURE sp_MaasGuncelle(IN p_PersonelID INT, IN p_YeniUcret DECIMAL(10,2))
-BEGIN
-    UPDATE Personeller SET SaatlikUcret = p_YeniUcret WHERE PersonelID = p_PersonelID;
-END //
-DELIMITER ;
+<div class="container">
+    <div class="row g-4">
+        <div class="col-lg-4">
+            <div class="card p-4">
+                <h5 class="fw-bold mb-4 text-dark"><i class="fas fa-plus-circle me-2 text-primary"></i>Yeni Personel Ekle</h5>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="small fw-bold text-secondary">Ad Soyad</label>
+                        <div class="row g-2">
+                            <div class="col"><input type="text" name="ad" class="form-control" placeholder="Ad" required></div>
+                            <div class="col"><input type="text" name="soyad" class="form-control" placeholder="Soyad" required></div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="small fw-bold text-secondary">Departman</label>
+                        <select name="dept_id" class="form-select">
+                            <?php foreach($db->query("SELECT * FROM Departmanlar") as $d): ?>
+                                <option value="<?=$d['DepartmanID']?>"><?=$d['DepartmanAdi']?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="small fw-bold text-secondary">Saatlik Ücret (₺)</label>
+                        <input type="number" name="ucret" class="form-control" placeholder="250" required>
+                    </div>
+                    <div class="row mb-4">
+                        <div class="col"><label class="small text-muted">Mesai Başlangıç</label><input type="time" name="giris" class="form-control" value="09:00"></div>
+                        <div class="col"><label class="small text-muted">Mesai Bitiş</label><input type="time" name="cikis" class="form-control" value="18:00"></div>
+                    </div>
+                    <button type="submit" name="kaydet" class="btn btn-add w-100 fw-bold shadow-sm">Sisteme Kaydet</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="card p-4">
+                <h5 class="fw-bold mb-4 text-dark"><i class="fas fa-table-list me-2 text-primary"></i>Aktif Personel Listesi</h5>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr class="small text-secondary">
+                                <th width="50">NO</th>
+                                <th>PERSONEL BİLGİSİ</th>
+                                <th>DEPARTMAN</th>
+                                <th>GÜNLÜK KAZANÇ</th>
+                                <th class="text-end">İŞLEM</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php 
+                            $personeller = $db->query("SELECT p.*, d.DepartmanAdi FROM Personeller p LEFT JOIN Departmanlar d ON p.DepartmanID = d.DepartmanID ORDER BY p.PersonelID DESC");
+                            $sayac = 1; 
+                            while($row = $personeller->fetch(PDO::FETCH_ASSOC)): 
+                                $saat_farki = (strtotime($row['CikisSaati']) - strtotime($row['GirisSaati'])) / 3600;
+                                $gunluk = $saat_farki * $row['SaatlikUcret'];
+                            ?>
+                            <tr>
+                                <td><span class="row-id"><?=$sayac++?></span></td>
+                                <td><strong><?=$row['Ad']." ".$row['Soyad']?></strong><br><small class="text-muted">Veritabanı ID: #<?=$row['PersonelID']?></small></td>
+                                <td><span class="badge bg-light text-dark border"><?=$row['DepartmanAdi'] ?? 'Belirtilmemiş'?></span></td>
+                                <td>
+                                    <small class="d-block text-muted"><?=substr($row['GirisSaati'],0,5)?> - <?=substr($row['CikisSaati'],0,5)?></small>
+                                    <span class="badge badge-money"><?=number_format($gunluk, 2)?> ₺</span>
+                                </td>
+                                <td class="text-end">
+                                    <a href="?sil=<?=$row['PersonelID']?>" class="btn btn-sm btn-outline-danger border-0" onclick="return confirm('Bu personeli silmek istediğinize emin misiniz?')"><i class="fas fa-trash-alt"></i></a>
+                                </td>
+                            </tr>
+                            <?php endwhile; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-5 opacity-25">
+    <div class="row g-4 mb-5">
+        <div class="col-md-7">
+            <div class="card p-4 shadow-sm">
+                <h6 class="fw-bold text-secondary mb-4 text-uppercase">Departman Bazlı Personel Dağılımı</h6>
+                <canvas id="personelGrafik" style="max-height: 250px;"></canvas>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="card p-4 bg-white border-start border-primary border-4 shadow-sm">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div><small class="text-muted d-block">Toplam Çalışan</small><h2 class="fw-bold m-0"><?=$db->query("SELECT count(*) FROM Personeller")->fetchColumn()?> Kişi</h2></div>
+                            <i class="fas fa-users fa-2x text-primary opacity-25"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="card p-4 bg-white border-start border-success border-4 shadow-sm">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div><small class="text-muted d-block">Saatlik Toplam Maliyet</small><h2 class="fw-bold m-0 text-success"><?=number_format($db->query("SELECT SUM(SaatlikUcret) FROM Personeller")->fetchColumn(), 2)?> ₺</h2></div>
+                            <i class="fas fa-turkish-lira-sign fa-2x text-success opacity-25"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const ctx = document.getElementById('personelGrafik');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: <?=json_encode($labels)?>,
+            datasets: [{
+                label: 'Personel Sayısı',
+                data: <?=json_encode($counts)?>,
+                backgroundColor: '#2563eb',
+                borderRadius: 12,
+                barThickness: 25
+            }]
+        },
+        options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { stepSize: 1 } } } }
+    });
+</script>
+</body>
+</html>
